@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { supabase } from '@/lib/supabase'
 import PostCard from '@/components/PostCard.vue'
 import Navbar from '@/components/NavBar.vue'
+import StoryBar from '@/components/StoryBar.vue'
 
 type Post = {
   id: string
@@ -53,7 +54,7 @@ const loadPosts = async () => {
         image_url,
         order_index
       )
-    `,
+  `,
     )
     .order('created_at', { ascending: false })
 
@@ -74,8 +75,8 @@ const loadPosts = async () => {
       const { count } = await supabase
         .from('likes')
         .select('*', {
-          count: 'exact',
           head: true,
+          count: 'exact',
         })
         .eq('post_id', post.id)
 
@@ -89,8 +90,11 @@ const loadPosts = async () => {
 
       return {
         ...post,
+
         likes: count || 0,
+
         liked: liked.length > 0,
+
         saved: savedIds.includes(post.id),
       }
     }),
@@ -112,19 +116,12 @@ const createPost = async () => {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!user) {
-    alert('Πρέπει να κάνεις login.')
-    return
-  }
+  if (!user) return
 
   if (images.value.length === 0) {
-    alert('Επέλεξε τουλάχιστον μία φωτογραφία.')
+    alert('Διάλεξε φωτογραφία')
     return
   }
-
-  // ===========================
-  // ΜΙΑ ΦΩΤΟΓΡΑΦΙΑ
-  // ===========================
 
   if (images.value.length === 1) {
     const file = images.value[0]
@@ -140,27 +137,21 @@ const createPost = async () => {
 
     const { data } = supabase.storage.from('post-images').getPublicUrl(fileName)
 
-    const { error } = await supabase.from('posts').insert({
+    await supabase.from('posts').insert({
       user_id: user.id,
+
       content: content.value,
+
       image_url: data.publicUrl,
     })
-
-    if (error) {
-      alert(error.message)
-      return
-    }
-  }
-
-  // ===========================
-  // ΠΟΛΛΕΣ ΦΩΤΟΓΡΑΦΙΕΣ
-  // ===========================
-  else {
+  } else {
     const { data: post, error } = await supabase
       .from('posts')
       .insert({
         user_id: user.id,
+
         content: content.value,
+
         image_url: null,
       })
       .select()
@@ -189,13 +180,16 @@ const createPost = async () => {
 
       await supabase.from('post_images').insert({
         post_id: post.id,
+
         image_url: data.publicUrl,
+
         order_index: i,
       })
     }
   }
 
   content.value = ''
+
   images.value = []
 
   await loadPosts()
@@ -216,6 +210,7 @@ onMounted(async () => {
   <Navbar />
 
   <div class="feed-container">
+    <StoryBar />
     <div class="create-post">
       <h2>Create Post</h2>
 
@@ -245,16 +240,20 @@ onMounted(async () => {
 <style scoped>
 .feed-container {
   max-width: 700px;
-  margin: 40px auto;
-  padding: 0 20px;
+  margin: auto;
+  padding: 25px;
 }
 
 .create-post {
+  margin-top: 20px;
+
   background: white;
-  border-radius: 14px;
+
+  border-radius: 16px;
+
   padding: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  margin-bottom: 30px;
+
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
 .create-post h2 {
@@ -263,15 +262,18 @@ onMounted(async () => {
 
 textarea {
   width: 100%;
-  min-height: 120px;
-  resize: none;
 
-  border: 1px solid #ddd;
-  border-radius: 10px;
+  min-height: 120px;
+
+  margin-top: 12px;
 
   padding: 12px;
 
-  font-size: 15px;
+  resize: none;
+
+  border: 1px solid #ddd;
+
+  border-radius: 10px;
 }
 
 button {
@@ -280,17 +282,14 @@ button {
   padding: 12px 24px;
 
   border: none;
-  border-radius: 8px;
 
-  background: royalblue;
+  border-radius: 10px;
+
+  background: #2563eb;
+
   color: white;
 
-  font-size: 15px;
-  font-weight: bold;
-
   cursor: pointer;
-
-  transition: 0.2s;
 }
 
 button:hover {
@@ -299,7 +298,11 @@ button:hover {
 
 .posts {
   display: flex;
+
   flex-direction: column;
-  gap: 20px;
+
+  gap: 22px;
+
+  margin-top: 25px;
 }
 </style>

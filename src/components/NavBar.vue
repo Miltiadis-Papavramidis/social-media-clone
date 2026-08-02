@@ -73,13 +73,12 @@ const openProfile = (id: string) => {
     </div>
 
     <div class="links">
-      <RouterLink to="/feed">🏠 Feed</RouterLink>
+      <RouterLink to="/feed"> 🏠 </RouterLink>
 
-      <RouterLink to="/profile">👤 Profile</RouterLink>
+      <RouterLink to="/messages"> 💬 </RouterLink>
 
-      <RouterLink to="/messages">📩DM</RouterLink>
-
-      <button @click="logout">🚪 Logout</button>
+      <RouterLink to="/profile"> 👤 </RouterLink>
+      <button class="logout" @click="logout">🚪</button>
     </div>
   </nav>
 </template>
@@ -156,10 +155,12 @@ button:hover {
 }
 
 .search-box input {
-  width: 250px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
+  width: 380px;
+  padding: 12px 18px;
+  border-radius: 30px;
+  border: none;
+  background: #f3f4f6;
+  font-size: 15px;
 }
 
 .search-results {
@@ -224,5 +225,39 @@ button:hover {
 
 .avatar-small span {
   font-size: 20px;
+}
+
+.links a {
+  width: 46px;
+  height: 46px;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  border-radius: 50%;
+
+  font-size: 22px;
+
+  transition: 0.2s;
+}
+
+.links a:hover {
+  background: #f3f3f3;
+}
+
+.logout {
+  width: 46px;
+  height: 46px;
+
+  border-radius: 50%;
+
+  background: #f3f3f3;
+
+  color: #444;
+}
+
+.logout:hover {
+  background: #ddd;
 }
 </style>
