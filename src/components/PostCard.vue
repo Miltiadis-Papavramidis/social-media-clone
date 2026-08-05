@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'vue-router'
 import { ref } from 'vue'
 import CommentModal from './CommentModal.vue'
+import SharePostModal from './SharePostModal.vue'
 
 const router = useRouter()
 
@@ -43,6 +44,8 @@ const emit = defineEmits<{
 }>()
 
 const showComments = ref(false)
+const showShare = ref(false)
+const currentImage = ref(0)
 
 const toggleLike = async () => {
   let error
@@ -104,8 +107,6 @@ const deletePost = async () => {
 
   emit('deleted', props.post.id)
 }
-
-const currentImage = ref(0)
 
 const nextImage = () => {
   currentImage.value = (currentImage.value + 1) % props.post.post_images.length
@@ -170,6 +171,8 @@ const prevImage = () => {
 
       <button class="icon-btn" @click="showComments = true">💬</button>
 
+      <button class="icon-btn" @click="showShare = true">📤</button>
+
       <button class="icon-btn" @click="toggleSave">
         <span :class="{ saved: saved }">🔖</span>
       </button>
@@ -180,6 +183,12 @@ const prevImage = () => {
       :post="post"
       :current-user-id="currentUserId"
       @close="showComments = false"
+    />
+    <SharePostModal
+      v-if="showShare"
+      :post="post"
+      :current-user-id="currentUserId"
+      @close="showShare = false"
     />
   </div>
 </template>

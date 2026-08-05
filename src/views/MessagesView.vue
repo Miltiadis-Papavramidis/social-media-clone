@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'vue-router'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import EmojiPicker from 'vue3-emoji-picker'
+import 'vue3-emoji-picker/css'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 const router = useRouter()
 
@@ -24,12 +27,38 @@ type Message = {
   edited: boolean
   reply_to: string | null
 
+  shared_post?: {
+    id: string
+    content: string
+    image_url: string | null
+
+    profiles: {
+      username: string
+      avatar_url: string | null
+    }
+
+    post_images: {
+      image_url: string
+    }[]
+  }
+
+  story?: {
+    id: string
+    media_url: string
+  }
+
+  stories?: {
+    id: string
+    media_url: string
+    media_type: string
+  }
+
   reply_message?: {
     id: string
     content: string
   }
 
-  profiles: {
+  profiles?: {
     username: string
     avatar_url: string | null
   }
@@ -41,12 +70,31 @@ type Message = {
   }[]
 }
 
-const replyingTo = ref<any | null>(null)
-const users = ref<Profile[]>([])
+type Conversation = {
+  id: string
+
+  otherUser: Profile
+
+  lastMessage: {
+    content: string | null
+    message_type: string
+    created_at: string
+  } | null
+}
+
+type PinnedMessage = {
+  id: string
+  content: string
+  sender_id: string
+}
+
+const replyingTo = ref<Message | null>(null)
+const conversations = ref<Conversation[]>([])
 const currentUserId = ref('')
 const selectedUser = ref<Profile | null>(null)
 const conversationId = ref('')
 const messages = ref<Message[]>([])
+const messagesContainer = ref<HTMLElement | null>(null)
 const newMessage = ref('')
 const showEditModal = ref(false)
 const editingMessage = ref<Message | null>(null)
@@ -60,9 +108,15 @@ const audioChunks = ref<Blob[]>([])
 const isRecording = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const previewImage = ref<string | null>(null)
-const pinnedMessage = ref<any>(null)
+const pinnedMessage = ref<PinnedMessage | null>(null)
+const showEmojiPicker = ref(false)
+const showConversationMenu = ref(false)
+const selectedConversation = ref<Conversation | null>(null)
+const conversationMenuX = ref(0)
+const conversationMenuY = ref(0)
 
-let channel: any = null
+let channel: RealtimeChannel | null = null
+let inboxChannel: RealtimeChannel | null = null
 
 const openProfile = (id: string) => {
   router.push(`/profile/${id}`)
@@ -73,7 +127,7 @@ const openImage = (url: string | null) => {
   previewImage.value = url
 }
 
-const loadUsers = async () => {
+const loadConversations = async () => {
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -82,17 +136,75 @@ const loadUsers = async () => {
 
   currentUserId.value = user.id
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .neq('id', user.id)
+  const { data: myMemberships, error } = await supabase
+    .from('conversation_members')
+    .select('conversation_id')
+    .eq('user_id', user.id)
 
   if (error) {
     console.error(error)
     return
   }
 
-  users.value = data || []
+  conversations.value = []
+
+  for (const membership of myMemberships || []) {
+    const convId = membership.conversation_id
+
+    // Αν η συνομιλία είναι κρυμμένη
+    const { data: hidden } = await supabase
+      .from('hidden_conversations')
+      .select('id, hidden_at')
+      .eq('conversation_id', convId)
+      .eq('user_id', currentUserId.value)
+      .maybeSingle()
+
+    // Μέλη συνομιλίας
+    const { data: members } = await supabase
+      .from('conversation_members')
+      .select(
+        `
+        user_id,
+        profiles(
+          id,
+          username,
+          avatar_url
+        )
+      `,
+      )
+      .eq('conversation_id', convId)
+
+    const other = members?.find((m: any) => m.user_id !== currentUserId.value)
+
+    if (!other) continue
+
+    // Τελευταίο μήνυμα
+    const { data: lastMessage } = await supabase
+      .from('messages')
+      .select('content,message_type,created_at')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    // Αν είναι hidden ΚΑΙ δεν υπάρχει νεότερο μήνυμα, μην το εμφανίσεις
+    if (hidden && lastMessage && new Date(lastMessage.created_at) <= new Date(hidden.hidden_at)) {
+      continue
+    }
+
+    conversations.value.push({
+      id: convId,
+      otherUser: other.profiles as Profile,
+      lastMessage,
+    })
+  }
+
+  conversations.value.sort((a, b) => {
+    const da = a.lastMessage?.created_at || ''
+    const db = b.lastMessage?.created_at || ''
+
+    return db.localeCompare(da)
+  })
 }
 
 const openConversation = async (user: Profile) => {
@@ -162,21 +274,39 @@ const loadMessages = async () => {
     .from('messages')
     .select(
       `
-*,
-profiles(
-    username,
-    avatar_url
-),
-reply_message:reply_to(
-    id,
-    content
-),
-message_reactions(
-    id,
-    emoji,
-    user_id
-)
-`,
+    *,
+    profiles(
+      username,
+      avatar_url
+    ),
+    stories:story_id(
+      id,
+      media_url,
+      media_type
+    ),
+    shared_post:shared_post_id(
+      id,
+      content,
+      image_url,
+      user_id,
+      profiles(
+        username,
+        avatar_url
+      ),
+      post_images(
+        image_url
+      )
+    ),
+    reply_message:reply_to(
+      id,
+      content
+    ),
+    message_reactions(
+      id,
+      emoji,
+      user_id
+    )
+  `,
     )
     .eq('conversation_id', conversationId.value)
     .order('created_at')
@@ -186,7 +316,17 @@ message_reactions(
     return
   }
 
-  messages.value = data || []
+  messages.value = data ?? []
+
+  console.log(messages.value)
+
+  nextTick(() => {
+    messagesContainer.value?.scrollTo({
+      top: messagesContainer.value.scrollHeight,
+
+      behavior: 'smooth',
+    })
+  })
 
   // Delivered
   await supabase
@@ -210,13 +350,20 @@ message_reactions(
 }
 
 const sendMessage = async () => {
-  if (!newMessage.value.trim()) return
-  if (!conversationId.value) return
+  if (!newMessage.value.trim() || !conversationId.value) return
+
+  // Αν η συνομιλία είναι κρυμμένη, την επαναφέρουμε
+  await supabase
+    .from('hidden_conversations')
+    .delete()
+    .eq('conversation_id', conversationId.value)
+    .eq('user_id', currentUserId.value)
 
   const { error } = await supabase.from('messages').insert({
     conversation_id: conversationId.value,
     sender_id: currentUserId.value,
     content: newMessage.value,
+    message_type: 'text',
     delivered: false,
     seen: false,
     edited: false,
@@ -231,7 +378,8 @@ const sendMessage = async () => {
   newMessage.value = ''
   replyingTo.value = null
 
-  await loadMessages()
+  // ανανέωση sidebar ώστε να εμφανιστεί αν ήταν κρυμμένη
+  await loadConversations()
 }
 
 const startRecording = async () => {
@@ -259,15 +407,19 @@ const startRecording = async () => {
 const stopRecording = () => {
   mediaRecorder.value?.stop()
 
+  mediaRecorder.value?.stream.getTracks().forEach((track) => track.stop())
+
   isRecording.value = false
 }
 
 const uploadAudio = async () => {
+  if (!conversationId.value) return
+
   const blob = new Blob(audioChunks.value, {
     type: 'audio/webm',
   })
 
-  const fileName = `${Date.now()}.webm`
+  const fileName = crypto.randomUUID() + '.webm'
 
   const { error: uploadError } = await supabase.storage
     .from('voice-messages')
@@ -280,22 +432,23 @@ const uploadAudio = async () => {
 
   const { data } = supabase.storage.from('voice-messages').getPublicUrl(fileName)
 
-  const { data: inserted, error } = await supabase
-    .from('messages')
-    .insert({
-      conversation_id: conversationId.value,
-      sender_id: currentUserId.value,
-      message_type: 'audio',
-      audio_url: data.publicUrl,
-      delivered: false,
-      seen: false,
-      edited: false,
-      reply_to: replyingTo.value?.id ?? null,
-    })
-    .select()
+  // Unhide conversation αν ήταν διαγραμμένη
+  await supabase
+    .from('hidden_conversations')
+    .delete()
+    .eq('conversation_id', conversationId.value)
+    .eq('user_id', currentUserId.value)
 
-  console.log(inserted)
-  console.error(error)
+  const { error } = await supabase.from('messages').insert({
+    conversation_id: conversationId.value,
+    sender_id: currentUserId.value,
+    message_type: 'audio',
+    audio_url: data.publicUrl,
+    delivered: false,
+    seen: false,
+    edited: false,
+    reply_to: replyingTo.value?.id ?? null,
+  })
 
   if (error) {
     alert(error.message)
@@ -304,21 +457,26 @@ const uploadAudio = async () => {
 
   replyingTo.value = null
 
-  await loadMessages()
+  await loadConversations()
 }
 
 const uploadFile = async (event: Event) => {
   const input = event.target as HTMLInputElement
 
-  if (!input.files?.length) return
+  if (!input.files?.length || !conversationId.value) return
 
   const file = input.files[0]
 
-  const extension = file.name.split('.').pop()
+  if (file.size > 20 * 1024 * 1024) {
+    alert('Maximum 20MB')
+    return
+  }
 
+  const extension = file.name.split('.').pop()
   const fileName = `${crypto.randomUUID()}.${extension}`
 
   const { error: uploadError } = await supabase.storage.from('chat-files').upload(fileName, file)
+
   if (uploadError) {
     console.error(uploadError)
     return
@@ -328,21 +486,23 @@ const uploadFile = async (event: Event) => {
 
   const type = file.type.startsWith('image/') ? 'image' : 'file'
 
+  // Unhide conversation αν ήταν διαγραμμένη
+  await supabase
+    .from('hidden_conversations')
+    .delete()
+    .eq('conversation_id', conversationId.value)
+    .eq('user_id', currentUserId.value)
+
   const { error } = await supabase.from('messages').insert({
     conversation_id: conversationId.value,
     sender_id: currentUserId.value,
-
     message_type: type,
-
     content: '',
-
     file_url: data.publicUrl,
     file_name: file.name,
-
     delivered: false,
     seen: false,
     edited: false,
-
     reply_to: replyingTo.value?.id ?? null,
   })
 
@@ -352,13 +512,14 @@ const uploadFile = async (event: Event) => {
   }
 
   replyingTo.value = null
-
   input.value = ''
 
-  await loadMessages()
+  await loadConversations()
 }
 
 const openMenu = (event: MouseEvent, message: Message) => {
+  showEmojiPicker.value = false
+
   event.preventDefault()
 
   selectedMessage.value = message
@@ -388,6 +549,29 @@ const subscribeToMessages = () => {
       },
       async () => {
         await loadMessages()
+        await loadConversations()
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'message_reactions',
+      },
+      async () => {
+        await loadMessages()
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'conversations',
+      },
+      async () => {
+        await loadPinnedMessage()
       },
     )
     .subscribe()
@@ -424,8 +608,6 @@ const saveEdit = async () => {
   showEditModal.value = false
 
   editingMessage.value = null
-
-  await loadMessages()
 }
 
 const cancelEdit = () => {
@@ -446,12 +628,14 @@ const deleteMessage = async () => {
 
   showMenu.value = false
   selectedMessage.value = null
-
-  await loadMessages()
 }
 
 const closeMenu = () => {
   showMenu.value = false
+  showEmojiPicker.value = false
+  showConversationMenu.value = false
+  selectedMessage.value = null
+  selectedConversation.value = null
 }
 
 const replyToMessage = () => {
@@ -508,7 +692,7 @@ const loadPinnedMessage = async () => {
     .eq('id', conversationId.value)
     .single()
 
-  pinnedMessage.value = data?.messages
+  pinnedMessage.value = data?.messages as PinnedMessage
 }
 
 const reactToMessage = async (emoji: string) => {
@@ -545,8 +729,6 @@ const reactToMessage = async (emoji: string) => {
 
   showMenu.value = false
   selectedMessage.value = null
-
-  await loadMessages()
 }
 
 const toggleReaction = async (reaction: any) => {
@@ -554,12 +736,80 @@ const toggleReaction = async (reaction: any) => {
   if (reaction.user_id !== currentUserId.value) return
 
   await supabase.from('message_reactions').delete().eq('id', reaction.id)
-
-  await loadMessages()
 }
 
-onMounted(() => {
-  loadUsers()
+const selectEmoji = async (emoji: any) => {
+  await reactToMessage(emoji.i)
+
+  showEmojiPicker.value = false
+}
+
+const deleteConversation = async () => {
+  const conversation = selectedConversation.value
+
+  if (!conversation) return
+
+  const { error } = await supabase.from('hidden_conversations').insert({
+    conversation_id: conversation.id,
+    user_id: currentUserId.value,
+  })
+
+  if (error) {
+    console.error(error)
+    return
+  }
+
+  if (conversationId.value === conversation.id) {
+    selectedUser.value = null
+    conversationId.value = ''
+    messages.value = []
+  }
+
+  showConversationMenu.value = false
+  selectedConversation.value = null
+
+  await loadConversations()
+}
+
+const openConversationMenu = (event: MouseEvent, conversation: Conversation) => {
+  event.preventDefault()
+  event.stopPropagation()
+
+  showMenu.value = false
+
+  selectedConversation.value = conversation
+
+  conversationMenuX.value = event.clientX
+  conversationMenuY.value = event.clientY
+
+  showConversationMenu.value = true
+}
+
+const subscribeInbox = () => {
+  if (inboxChannel) {
+    supabase.removeChannel(inboxChannel)
+  }
+
+  inboxChannel = supabase
+    .channel('messages-sidebar')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      },
+      async () => {
+        await loadConversations()
+      },
+    )
+    .subscribe()
+}
+
+onMounted(async () => {
+  await loadConversations()
+
+  subscribeInbox()
 
   window.addEventListener('click', closeMenu)
 })
@@ -567,6 +817,10 @@ onMounted(() => {
 onUnmounted(() => {
   if (channel) {
     supabase.removeChannel(channel)
+  }
+
+  if (inboxChannel) {
+    supabase.removeChannel(inboxChannel)
   }
 
   window.removeEventListener('click', closeMenu)
@@ -579,12 +833,36 @@ onUnmounted(() => {
     <div class="sidebar">
       <h2>Messages</h2>
 
-      <div v-for="user in users" :key="user.id" class="user-card" @click="openConversation(user)">
-        <img v-if="user.avatar_url" :src="user.avatar_url" class="avatar" />
+      <div
+        v-for="conversation in conversations"
+        :key="conversation.id"
+        class="user-card"
+        @click="openConversation(conversation.otherUser)"
+        @contextmenu.prevent="openConversationMenu($event, conversation)"
+      >
+        <img
+          v-if="conversation.otherUser.avatar_url"
+          :src="conversation.otherUser.avatar_url"
+          class="avatar"
+        />
 
         <div v-else class="avatar-placeholder">👤</div>
 
-        <span>{{ user.username }}</span>
+        <div class="conversation-info">
+          <strong>{{ conversation.otherUser.username }}</strong>
+
+          <small v-if="conversation.lastMessage">
+            {{
+              conversation.lastMessage.message_type === 'text'
+                ? conversation.lastMessage.content
+                : conversation.lastMessage.message_type === 'image'
+                  ? '📷 Photo'
+                  : conversation.lastMessage.message_type === 'audio'
+                    ? '🎤 Voice message'
+                    : '📄 File'
+            }}
+          </small>
+        </div>
       </div>
     </div>
 
@@ -611,7 +889,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Messages -->
-        <div class="messages">
+        <div ref="messagesContainer" class="messages">
           <div
             v-for="message in messages"
             :key="message.id"
@@ -650,10 +928,49 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Reply preview -->
-                <div v-if="message.reply_message" class="reply-box">
-                  <strong>Reply</strong>
+                <div v-if="message.message_type === 'story_reply'" class="story-reply">
+                  <div class="story-preview">
+                    <img
+                      v-if="message.stories?.media_type === 'image'"
+                      :src="message.stories.media_url"
+                    />
 
-                  <p>{{ message.reply_message.content }}</p>
+                    <video v-else :src="message.stories?.media_url" />
+                  </div>
+
+                  <div class="story-text">
+                    {{ message.content }}
+                  </div>
+                </div>
+
+                <div v-else-if="message.message_type === 'shared_post'" class="shared-post">
+                  <div class="shared-header">
+                    <img
+                      v-if="message.shared_post?.profiles.avatar_url"
+                      :src="message.shared_post.profiles.avatar_url"
+                      class="shared-avatar"
+                    />
+
+                    <strong>
+                      {{ message.shared_post?.profiles.username }}
+                    </strong>
+                  </div>
+
+                  <p>
+                    {{ message.shared_post?.content }}
+                  </p>
+
+                  <img
+                    v-if="message.shared_post?.image_url"
+                    :src="message.shared_post.image_url"
+                    class="shared-image"
+                  />
+
+                  <img
+                    v-else-if="message.shared_post?.post_images?.length"
+                    :src="message.shared_post.post_images[0].image_url"
+                    class="shared-image"
+                  />
                 </div>
 
                 <!-- Message -->
@@ -697,7 +1014,9 @@ onUnmounted(() => {
         <div v-if="replyingTo" class="reply-preview">
           <strong>
             Replying to
-            {{ replyingTo.sender_id === currentUserId ? 'yourself' : replyingTo.profiles.username }}
+            {{
+              replyingTo.sender_id === currentUserId ? 'yourself' : replyingTo.profiles?.username
+            }}
           </strong>
 
           <p>
@@ -715,9 +1034,9 @@ onUnmounted(() => {
 
           <button v-else @click="stopRecording">⏹</button>
 
-          <button @click="sendMessage">Send</button>
-
           <input ref="fileInput" type="file" hidden @change="uploadFile" />
+
+          <button @click="sendMessage">Send</button>
 
           <button @click="fileInput?.click()">📎</button>
         </div>
@@ -739,15 +1058,13 @@ onUnmounted(() => {
         top: menuY + 'px',
       }"
     >
-      <div class="emoji-picker">
-        <span @click="reactToMessage('❤️')">❤️</span>
-        <span @click="reactToMessage('😂')">😂</span>
-        <span @click="reactToMessage('😮')">😮</span>
-        <span @click="reactToMessage('😢')">😢</span>
-        <span @click="reactToMessage('😡')">😡</span>
-        <span @click="reactToMessage('👍')">👍</span>
-      </div>
+      <div class="emoji-picker-wrapper">
+        <button @click.stop="showEmojiPicker = !showEmojiPicker">😀 React</button>
 
+        <div v-if="showEmojiPicker" class="picker-popup" @click.stop>
+          <EmojiPicker @select="selectEmoji" />
+        </div>
+      </div>
       <button @click="replyToMessage">↩️ Reply</button>
 
       <button v-if="selectedMessage" @click="pinMessage(selectedMessage.id)">📌 Pin</button>
@@ -757,6 +1074,18 @@ onUnmounted(() => {
 
         <button @click="deleteMessage">🗑 Delete</button>
       </template>
+    </div>
+
+    <!-- Conversation Context Menu -->
+    <div
+      v-if="showConversationMenu"
+      class="context-menu"
+      :style="{
+        left: conversationMenuX + 'px',
+        top: conversationMenuY + 'px',
+      }"
+    >
+      <button @click="deleteConversation">🗑 Delete chat</button>
     </div>
 
     <!-- Edit Modal -->
@@ -869,7 +1198,7 @@ onUnmounted(() => {
   padding-top: 15px;
   border-top: 1px solid #eee;
   background: white;
-}Φ
+}
 
 .chat-input input {
   flex: 1;
@@ -938,11 +1267,6 @@ onUnmounted(() => {
   background: #ececec;
 }
 
-.mine {
-  background: royalblue;
-  color: white;
-}
-
 .theirs {
   background: #ececec;
   color: black;
@@ -951,7 +1275,6 @@ onUnmounted(() => {
 .message-status {
   font-size: 11px;
   color: gray;
-
   margin-top: 4px;
   text-align: right;
 }
@@ -967,11 +1290,6 @@ onUnmounted(() => {
 
 .theirs-row .message-wrapper {
   align-items: flex-start;
-}
-.message-status {
-  font-size: 11px;
-  margin-top: 4px;
-  color: #999;
 }
 
 .message-status span:first-child {
@@ -1149,6 +1467,7 @@ onUnmounted(() => {
   gap: 10px;
   padding: 10px;
   border-bottom: 1px solid #eee;
+  padding: 0;
 }
 
 .emoji-picker span {
@@ -1189,5 +1508,84 @@ onUnmounted(() => {
 
 .reaction:hover {
   transform: scale(1.2);
+}
+
+.emoji-picker {
+  padding: 0;
+}
+
+.conversation-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.conversation-info strong {
+  font-size: 15px;
+}
+
+.conversation-info small {
+  color: #777;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.story-thumb {
+  width: 46px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.story-reply {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.story-preview img,
+.story-preview video {
+  width: 55px;
+  height: 80px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.story-text {
+  font-size: 15px;
+}
+
+.shared-post {
+  background: #f5f5f5;
+  border-radius: 14px;
+  overflow: hidden;
+  max-width: 260px;
+}
+
+.shared-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.shared-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.shared-image {
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+}
+
+.shared-post p {
+  padding: 0 10px 10px;
+  margin: 0;
 }
 </style>

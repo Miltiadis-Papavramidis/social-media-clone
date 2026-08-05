@@ -18,7 +18,8 @@
     "@supabase/supabase-js": "^2.110.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.38",
-    "vue-router": "^5.1.0"
+    "vue-router": "^5.1.0",
+    "vue3-emoji-picker": "^1.1.8"
   },
   "devDependencies": {
     "@tsconfig/node24": "^24.0.4",

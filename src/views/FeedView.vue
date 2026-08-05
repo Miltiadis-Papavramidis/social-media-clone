@@ -214,7 +214,10 @@ onMounted(async () => {
     <div class="create-post">
       <h2>Create Post</h2>
 
-      <input type="file" accept="image/*" multiple @change="handleImages" />
+      <label class="upload-btn">
+        📷 Add photos
+        <input type="file" accept="image/*" multiple @change="handleImages" hidden />
+      </label>
 
       <textarea v-model="content" placeholder="Write a caption..."></textarea>
 
@@ -239,70 +242,84 @@ onMounted(async () => {
 
 <style scoped>
 .feed-container {
-  max-width: 700px;
-  margin: auto;
-  padding: 25px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 30px 20px 80px;
+}
+
+body {
+  background: #f5f5f7;
 }
 
 .create-post {
-  margin-top: 20px;
-
+  margin-top: 22px;
   background: white;
-
-  border-radius: 16px;
-
-  padding: 20px;
-
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+  border-radius: 18px;
+  padding: 22px;
+  border: 1px solid #ececec;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.06);
 }
 
 .create-post h2 {
-  margin-bottom: 15px;
+  margin: 0 0 18px;
+  font-size: 22px;
+  font-weight: 700;
 }
 
-textarea {
-  width: 100%;
-
-  min-height: 120px;
-
-  margin-top: 12px;
-
-  padding: 12px;
-
-  resize: none;
-
-  border: 1px solid #ddd;
-
-  border-radius: 10px;
+.upload-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 18px;
+    background:#f3f4f6;
+    border-radius:10px;
+    cursor:pointer;
+    transition:.2s;
 }
 
-button {
-  margin-top: 15px;
-
-  padding: 12px 24px;
-
-  border: none;
-
-  border-radius: 10px;
-
-  background: #2563eb;
-
-  color: white;
-
-  cursor: pointer;
+.upload-btn:hover{
+    background:#e5e7eb;
 }
 
-button:hover {
-  background: #295edb;
+textarea{
+    width:100%;
+    min-height:110px;
+    margin-top:18px;
+    padding:14px 16px;
+    border:1px solid #ddd;
+    border-radius:14px;
+    font-size:15px;
+    outline:none;
+    transition:.2s;
 }
 
-.posts {
-  display: flex;
+textarea:focus{
+    border-color:#2563eb;
+}
 
-  flex-direction: column;
+button{
+    margin-top:18px;
+    width:100%;
+    padding:14px;
+    border:none;
+    border-radius:12px;
+    background:#2563eb;
+    color:white;
+    font-size:15px;
+    font-weight:600;
+    cursor:pointer;
+    transition:.2s;
+}
 
-  gap: 22px;
+button:hover{
+    transform:translateY(-1px);
+    background:#1d4ed8;
+}
 
-  margin-top: 25px;
+.posts{
+    margin-top:30px;
+    display:flex;
+    flex-direction:column;
+    gap:26px;
 }
 </style>
