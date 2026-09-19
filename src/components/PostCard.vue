@@ -36,6 +36,8 @@ const props = defineProps<{
   likes: number
   liked: boolean
   saved?: boolean
+  comments: Number
+  shares: Number
 }>()
 
 const emit = defineEmits<{
@@ -170,8 +172,10 @@ const prevImage = () => {
       <span>{{ likes }}</span>
 
       <button class="icon-btn" @click="showComments = true">💬</button>
+       <span>{{ comments }}</span>
 
       <button class="icon-btn" @click="showShare = true">📤</button>
+      <span>{{ shares }}</span>
 
       <button class="icon-btn" @click="toggleSave">
         <span :class="{ saved: saved }">🔖</span>

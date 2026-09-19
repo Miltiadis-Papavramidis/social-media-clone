@@ -20,6 +20,8 @@ type Post = {
   likes: number
   liked: boolean
   saved: boolean
+  comments: number
+  shares: number
 
   post_images: {
     id: string
@@ -86,6 +88,23 @@ const loadPosts = async () => {
         .eq('post_id', post.id)
         .eq('user_id', user.id)
 
+      const { count: commentsCount } = await supabase
+        .from('comments')
+        .select('*', {
+          head: true,
+          count: 'exact',
+        })
+        .eq('post_id', post.id)
+
+      const { count: sharesCount } = await supabase
+        .from('messages')
+        .select('*', {
+          head: true,
+          count: 'exact',
+        })
+        .eq('message_type', 'post_share')
+        .eq('shared_post_id', post.id)
+
       post.post_images.sort((a: any, b: any) => a.order_index - b.order_index)
 
       return {
@@ -96,6 +115,8 @@ const loadPosts = async () => {
         liked: liked.length > 0,
 
         saved: savedIds.includes(post.id),
+        comments: commentsCount || 0,
+        shares: sharesCount || 0,
       }
     }),
   )
@@ -233,6 +254,8 @@ onMounted(async () => {
         :likes="post.likes"
         :liked="post.liked"
         :saved="post.saved"
+        :comments="post.comments"
+        :shares="post.shares"
         @deleted="loadPosts"
         @refresh="loadPosts"
       />
@@ -266,60 +289,60 @@ body {
   font-weight: 700;
 }
 
-.upload-btn{
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:10px 18px;
-    background:#f3f4f6;
-    border-radius:10px;
-    cursor:pointer;
-    transition:.2s;
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: #f3f4f6;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: 0.2s;
 }
 
-.upload-btn:hover{
-    background:#e5e7eb;
+.upload-btn:hover {
+  background: #e5e7eb;
 }
 
-textarea{
-    width:100%;
-    min-height:110px;
-    margin-top:18px;
-    padding:14px 16px;
-    border:1px solid #ddd;
-    border-radius:14px;
-    font-size:15px;
-    outline:none;
-    transition:.2s;
+textarea {
+  width: 100%;
+  min-height: 110px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #ddd;
+  border-radius: 14px;
+  font-size: 15px;
+  outline: none;
+  transition: 0.2s;
 }
 
-textarea:focus{
-    border-color:#2563eb;
+textarea:focus {
+  border-color: #2563eb;
 }
 
-button{
-    margin-top:18px;
-    width:100%;
-    padding:14px;
-    border:none;
-    border-radius:12px;
-    background:#2563eb;
-    color:white;
-    font-size:15px;
-    font-weight:600;
-    cursor:pointer;
-    transition:.2s;
+button {
+  margin-top: 18px;
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  background: #2563eb;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
 }
 
-button:hover{
-    transform:translateY(-1px);
-    background:#1d4ed8;
+button:hover {
+  transform: translateY(-1px);
+  background: #1d4ed8;
 }
 
-.posts{
-    margin-top:30px;
-    display:flex;
-    flex-direction:column;
-    gap:26px;
+.posts {
+  margin-top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
 }
 </style>
